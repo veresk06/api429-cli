@@ -38,12 +38,12 @@ Issues = "https://github.com/veresk06/api429-cli/issues"
 
 [project.optional-dependencies]
 test = [
-  "pytest>=8,<9",
+  "pytest>=8,<10",
 ]
 dev = [
   "build>=1,<2",
   "mypy>=1.11,<2",
-  "pytest>=8,<9",
+  "pytest>=8,<10",
   "ruff>=0.9,<1",
 ]
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import socket
+import ssl
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -698,6 +699,12 @@ def test_pinned_connection_uses_validated_sockaddr_and_original_sni(
             events.append(("read_timeout", value))
 
     class FakeContext:
+        # Python 3.10/3.11 inspect these SSLContext attributes in
+        # HTTPSConnection.__init__, while newer versions no longer require
+        # them for this test double.
+        verify_mode = ssl.CERT_REQUIRED
+        check_hostname = True
+
         def wrap_socket(
             self,
             raw_socket: FakeRawSocket,

@@ -1,0 +1,45 @@
+{
+  "name": "@api429/cli",
+  "version": "0.1.0",
+  "description": "Official command-line client for the API429 gateway",
+  "type": "commonjs",
+  "bin": {
+    "api429": "bin/api429.js"
+  },
+  "files": [
+    "bin/api429.js",
+    "lib/launcher.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "api429",
+    "ai",
+    "cli",
+    "image-generation",
+    "video-generation"
+  ],
+  "homepage": "https://api429.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/veresk06/api429-cli.git",
+    "directory": "npm/packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/veresk06/api429-cli/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "optionalDependencies": {
+    "@api429/cli-darwin-arm64": "0.1.0",
+    "@api429/cli-darwin-x64": "0.1.0",
+    "@api429/cli-linux-arm64-gnu": "0.1.0",
+    "@api429/cli-linux-x64-gnu": "0.1.0",
+    "@api429/cli-win32-arm64": "0.1.0",
+    "@api429/cli-win32-x64": "0.1.0"
+  }
+}

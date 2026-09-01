@@ -8,13 +8,36 @@
 `api429` is the official command-line client for the API429 gateway. It can
 inspect account state and available models, generate or edit images, submit
 video jobs, wait for asynchronous results, and save returned media locally.
-
-The CLI requires Python 3.10 or newer. Its default gateway is
-`https://gateway.api429.com`.
+Its default gateway is `https://gateway.api429.com`.
 
 ## Installation
 
-For an editable installation from a repository checkout:
+The recommended installation uses npm and does not require Python. Once the
+first public release is available:
+
+```bash
+npm install --global @api429/cli
+api429 --version
+```
+
+The npm package selects a native executable for macOS, GNU/Linux, or Windows
+on x64 and ARM64. Alpine Linux and other musl-based distributions are not part
+of the first release.
+
+Once published, Python users can install the same CLI in an isolated
+environment with Python 3.10 or newer:
+
+```bash
+pipx install api429-cli
+```
+
+Or install it into the active Python environment:
+
+```bash
+python -m pip install api429-cli
+```
+
+For an editable development installation from a repository checkout:
 
 ```bash
 python3 -m venv .venv
@@ -26,22 +49,10 @@ api429 --version
 On Windows PowerShell, activate the environment with
 `.venv\Scripts\Activate.ps1` instead.
 
-For a regular installation from a checkout:
+For a regular Python installation from a checkout:
 
 ```bash
 python -m pip install .
-```
-
-When a release is available on PyPI, install it in an isolated environment:
-
-```bash
-pipx install api429-cli
-```
-
-Or install it into the active Python environment:
-
-```bash
-python -m pip install api429-cli
 ```
 
 ## Authentication

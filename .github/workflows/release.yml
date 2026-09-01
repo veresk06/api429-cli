@@ -229,7 +229,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       PYTHONHASHSEED: "0"
-      SOURCE_DATE_EPOCH: "0"
     permissions:
       contents: read
       id-token: write

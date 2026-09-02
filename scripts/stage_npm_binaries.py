@@ -17,6 +17,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import IO
 
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.legal_corpus import LegalCorpusError, LegalFile, load_legal_corpus
+
 MAX_EXECUTABLE_BYTES = 512 * 1024 * 1024
 EXPECTED_RUNTIME_DISTRIBUTIONS = {
     "anyio",
@@ -80,11 +85,15 @@ def _safe_file_name(value: object, *, field: str) -> str:
     return value
 
 
-def _bounded_read(handle: IO[bytes], *, expected_size: int) -> bytes:
-    if expected_size < 1 or expected_size > MAX_EXECUTABLE_BYTES:
-        raise StagingError(
-            f"executable size {expected_size} is outside the allowed range"
-        )
+def _bounded_read(
+    handle: IO[bytes],
+    *,
+    expected_size: int,
+    maximum_size: int,
+    label: str,
+) -> bytes:
+    if expected_size < 1 or expected_size > maximum_size:
+        raise StagingError(f"{label} size {expected_size} is outside the allowed range")
     payload = handle.read(expected_size + 1)
     if len(payload) != expected_size:
         raise StagingError(
@@ -93,49 +102,115 @@ def _bounded_read(handle: IO[bytes], *, expected_size: int) -> bytes:
     return payload
 
 
-def _extract_tar(path: Path, executable: str, expected_size: int) -> bytes:
+def _expected_archive_entries(
+    executable: str,
+    expected_size: int,
+    legal_files: Sequence[LegalFile],
+) -> list[tuple[str, int, int]]:
+    return [
+        (executable, expected_size, 0o755),
+        *((item.archive_path, item.size, 0o644) for item in legal_files),
+    ]
+
+
+def _extract_tar(
+    path: Path,
+    executable: str,
+    expected_size: int,
+    legal_files: Sequence[LegalFile],
+) -> tuple[bytes, dict[str, bytes]]:
+    expected_entries = _expected_archive_entries(executable, expected_size, legal_files)
     try:
         with tarfile.open(path, mode="r:gz") as bundle:
             members = bundle.getmembers()
-            if len(members) != 1:
-                raise StagingError(f"{path.name} must contain exactly one entry")
-            member = members[0]
-            if member.name != executable or not member.isfile():
+            if [member.name for member in members] != [
+                name for name, _size, _mode in expected_entries
+            ]:
                 raise StagingError(
-                    f"{path.name} must contain one regular file named {executable}"
+                    f"{path.name} does not contain the exact ordered release corpus"
                 )
-            if member.size != expected_size:
-                raise StagingError(
-                    f"{path.name} declares {member.size} bytes, expected {expected_size}"
+            extracted: dict[str, bytes] = {}
+            for member, (name, size, mode) in zip(
+                members, expected_entries, strict=True
+            ):
+                if not member.isfile() or member.mode != mode:
+                    raise StagingError(
+                        f"{path.name} entry {name} must be a regular file with "
+                        f"mode {mode:04o}"
+                    )
+                if member.size != size:
+                    raise StagingError(
+                        f"{path.name} entry {name} declares {member.size} bytes, "
+                        f"expected {size}"
+                    )
+                handle = bundle.extractfile(member)
+                if handle is None:
+                    raise StagingError(f"cannot extract {name} from {path.name}")
+                maximum = (
+                    MAX_EXECUTABLE_BYTES
+                    if name == executable
+                    else max(item.size for item in legal_files)
                 )
-            handle = bundle.extractfile(member)
-            if handle is None:
-                raise StagingError(f"cannot extract {executable} from {path.name}")
-            return _bounded_read(handle, expected_size=expected_size)
+                extracted[name] = _bounded_read(
+                    handle,
+                    expected_size=size,
+                    maximum_size=maximum,
+                    label=name,
+                )
+            return extracted.pop(executable), extracted
     except (OSError, tarfile.TarError) as exc:
         raise StagingError(f"cannot read {path.name}: {exc}") from exc
 
 
-def _extract_zip(path: Path, executable: str, expected_size: int) -> bytes:
+def _extract_zip(
+    path: Path,
+    executable: str,
+    expected_size: int,
+    legal_files: Sequence[LegalFile],
+) -> tuple[bytes, dict[str, bytes]]:
+    expected_entries = _expected_archive_entries(executable, expected_size, legal_files)
     try:
         with zipfile.ZipFile(path) as bundle:
             infos = bundle.infolist()
-            if len(infos) != 1:
-                raise StagingError(f"{path.name} must contain exactly one entry")
-            info = infos[0]
-            if info.filename != executable or info.is_dir():
+            if [info.filename for info in infos] != [
+                name for name, _size, _mode in expected_entries
+            ]:
                 raise StagingError(
-                    f"{path.name} must contain one regular file named {executable}"
+                    f"{path.name} does not contain the exact ordered release corpus"
                 )
-            mode = (info.external_attr >> 16) & 0xFFFF
-            if mode and stat.S_ISLNK(mode):
-                raise StagingError(f"{path.name} must not contain a symbolic link")
-            if info.file_size != expected_size:
-                raise StagingError(
-                    f"{path.name} declares {info.file_size} bytes, expected {expected_size}"
+            extracted: dict[str, bytes] = {}
+            for info, (name, size, expected_mode) in zip(
+                infos, expected_entries, strict=True
+            ):
+                mode = (info.external_attr >> 16) & 0xFFFF
+                if (
+                    info.is_dir()
+                    or stat.S_ISLNK(mode)
+                    or not stat.S_ISREG(mode)
+                    or stat.S_IMODE(mode) != expected_mode
+                ):
+                    raise StagingError(
+                        f"{path.name} entry {name} must be a regular file with "
+                        f"mode {expected_mode:04o}"
+                    )
+                if info.file_size != size:
+                    raise StagingError(
+                        f"{path.name} entry {name} declares {info.file_size} bytes, "
+                        f"expected {size}"
+                    )
+                maximum = (
+                    MAX_EXECUTABLE_BYTES
+                    if name == executable
+                    else max(item.size for item in legal_files)
                 )
-            with bundle.open(info, mode="r") as handle:
-                return _bounded_read(handle, expected_size=expected_size)
+                with bundle.open(info, mode="r") as handle:
+                    extracted[name] = _bounded_read(
+                        handle,
+                        expected_size=size,
+                        maximum_size=maximum,
+                        label=name,
+                    )
+            return extracted.pop(executable), extracted
     except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
         raise StagingError(f"cannot read {path.name}: {exc}") from exc
 
@@ -166,7 +241,11 @@ def _integer_field(manifest: dict[str, object], field: str) -> int:
     return value
 
 
-def _verify_build_metadata(manifest: dict[str, object], manifest_path: Path) -> None:
+def _verify_build_metadata(
+    manifest: dict[str, object],
+    manifest_path: Path,
+    legal_files: Sequence[LegalFile],
+) -> None:
     python_version = manifest.get("python")
     if not isinstance(python_version, str) or not python_version:
         raise StagingError(f"{manifest_path.name}: missing Python build version")
@@ -200,19 +279,28 @@ def _verify_build_metadata(manifest: dict[str, object], manifest_path: Path) -> 
         )
     ):
         raise StagingError(f"{manifest_path.name}: invalid frozen native inventory")
+    expected_legal_files = [
+        {"path": item.archive_path, "sha256": item.sha256, "size": item.size}
+        for item in legal_files
+    ]
+    if manifest.get("legal_files") != expected_legal_files:
+        raise StagingError(
+            f"{manifest_path.name}: standalone legal corpus does not match this source"
+        )
 
 
 def verify_artifact(
     artifacts: Path,
     npm_root: Path,
     target: NpmTarget,
-) -> tuple[bytes, dict[str, object], Path]:
+    legal_files: Sequence[LegalFile],
+) -> tuple[bytes, dict[str, bytes], dict[str, object], Path]:
     manifest_path = _find_manifest(artifacts, target)
     manifest = _read_json(manifest_path)
     expected_version = _package_version(npm_root, target)
 
     expected_fields: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "package": "api429-cli",
         "version": expected_version,
         "target": target.target,
@@ -224,7 +312,7 @@ def verify_artifact(
                 f"{manifest_path.name}: {field}={manifest.get(field)!r}, "
                 f"expected {expected!r}"
             )
-    _verify_build_metadata(manifest, manifest_path)
+    _verify_build_metadata(manifest, manifest_path, legal_files)
 
     archive_name = _safe_file_name(manifest.get("archive"), field="archive")
     archive = artifacts / archive_name
@@ -242,9 +330,19 @@ def verify_artifact(
 
     expected_executable_size = _integer_field(manifest, "executable_size")
     if archive_name.endswith(".tar.gz"):
-        payload = _extract_tar(archive, target.executable, expected_executable_size)
+        payload, legal_payloads = _extract_tar(
+            archive,
+            target.executable,
+            expected_executable_size,
+            legal_files,
+        )
     elif archive_name.endswith(".zip"):
-        payload = _extract_zip(archive, target.executable, expected_executable_size)
+        payload, legal_payloads = _extract_zip(
+            archive,
+            target.executable,
+            expected_executable_size,
+            legal_files,
+        )
     else:
         raise StagingError(f"unsupported archive format: {archive_name}")
 
@@ -254,12 +352,18 @@ def verify_artifact(
         or sha256_bytes(payload) != executable_digest
     ):
         raise StagingError(f"SHA-256 mismatch for {target.executable}")
-    return payload, manifest, manifest_path
+    for item in legal_files:
+        legal_payload = legal_payloads.get(item.archive_path)
+        if legal_payload is None or sha256_bytes(legal_payload) != item.sha256:
+            raise StagingError(
+                f"SHA-256 mismatch for legal corpus entry {item.archive_path}"
+            )
+    return payload, legal_payloads, manifest, manifest_path
 
 
-def _atomic_write(path: Path, payload: bytes, *, force: bool) -> None:
+def _atomic_write(path: Path, payload: bytes, *, force: bool, mode: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() and not force:
+    if (path.exists() or path.is_symlink()) and not force:
         raise StagingError(f"refusing to replace {path}; use --force")
     descriptor, temporary_name = tempfile.mkstemp(
         dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
@@ -270,7 +374,7 @@ def _atomic_write(path: Path, payload: bytes, *, force: bool) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        temporary.chmod(0o755)
+        temporary.chmod(mode)
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -289,23 +393,55 @@ def stage_all(
     if not (npm_root / "packages" / "cli" / "package.json").is_file():
         raise StagingError(f"not an API429 npm workspace: {npm_root}")
 
-    verified: list[tuple[NpmTarget, bytes, dict[str, object], Path]] = []
+    try:
+        legal_files = load_legal_corpus(npm_root.parent)
+    except LegalCorpusError as exc:
+        raise StagingError(f"invalid release legal corpus: {exc}") from exc
+
+    verified: list[
+        tuple[NpmTarget, bytes, dict[str, bytes], dict[str, object], Path]
+    ] = []
     for target in TARGETS:
-        payload, manifest, manifest_path = verify_artifact(artifacts, npm_root, target)
-        verified.append((target, payload, manifest, manifest_path))
+        payload, legal_payloads, manifest, manifest_path = verify_artifact(
+            artifacts, npm_root, target, legal_files
+        )
+        verified.append((target, payload, legal_payloads, manifest, manifest_path))
+
+    destinations = [
+        npm_root / "packages" / target.package_directory / relative_path
+        for target, _payload, _legal_payloads, _manifest, _manifest_path in verified
+        for relative_path in [
+            f"bin/{target.executable}",
+            *(item.archive_path for item in legal_files),
+        ]
+    ]
+    if not force:
+        existing = [path for path in destinations if path.exists() or path.is_symlink()]
+        if existing:
+            rendered = ", ".join(str(path) for path in existing)
+            raise StagingError(
+                f"refusing to replace staged file(s): {rendered}; use --force"
+            )
 
     result: list[dict[str, object]] = []
-    for target, payload, manifest, manifest_path in verified:
-        destination = (
-            npm_root / "packages" / target.package_directory / "bin" / target.executable
-        )
-        _atomic_write(destination, payload, force=force)
+    for target, payload, legal_payloads, manifest, manifest_path in verified:
+        package = npm_root / "packages" / target.package_directory
+        destination = package / "bin" / target.executable
+        _atomic_write(destination, payload, force=force, mode=0o755)
+        for item in legal_files:
+            _atomic_write(
+                package.joinpath(*PurePosixPath(item.archive_path).parts),
+                legal_payloads[item.archive_path],
+                force=force,
+                mode=0o644,
+            )
         result.append(
             {
                 "target": target.target,
                 "package_directory": target.package_directory,
                 "binary": str(destination),
                 "binary_sha256": manifest["executable_sha256"],
+                "legal_files": len(legal_files),
                 "manifest": str(manifest_path),
             }
         )

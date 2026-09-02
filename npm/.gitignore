@@ -5,3 +5,15 @@ node_modules/
 packages/cli-darwin-*/bin/api429
 packages/cli-linux-*/bin/api429
 packages/cli-win32-*/bin/api429.exe
+
+# Legal files are verified inside each standalone archive and staged beside the
+# corresponding native payload. The source-of-truth corpus lives at repo root.
+packages/cli-darwin-*/LICENSE
+packages/cli-darwin-*/THIRD_PARTY_NOTICES.md
+packages/cli-darwin-*/licenses/
+packages/cli-linux-*/LICENSE
+packages/cli-linux-*/THIRD_PARTY_NOTICES.md
+packages/cli-linux-*/licenses/
+packages/cli-win32-*/LICENSE
+packages/cli-win32-*/THIRD_PARTY_NOTICES.md
+packages/cli-win32-*/licenses/

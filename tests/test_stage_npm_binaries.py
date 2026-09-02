@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
 from scripts.build_standalone import Target, artifact_names, create_archive
+from scripts.legal_corpus import load_legal_corpus
 from scripts.stage_npm_binaries import (
     TARGETS,
     StagingError,
@@ -13,6 +15,8 @@ from scripts.stage_npm_binaries import (
     sha256_file,
     stage_all,
 )
+
+REPOSITORY = Path(__file__).resolve().parent.parent
 
 
 def _write_fixture_set(root: Path) -> tuple[Path, Path, bytes]:
@@ -23,6 +27,13 @@ def _write_fixture_set(root: Path) -> tuple[Path, Path, bytes]:
     (npm_root / "packages" / "cli" / "package.json").write_text(
         '{"name":"@api429/cli","version":"0.1.0"}\n', encoding="utf-8"
     )
+    shutil.copyfile(REPOSITORY / "LICENSE", root / "LICENSE")
+    shutil.copyfile(
+        REPOSITORY / "THIRD_PARTY_NOTICES.md",
+        root / "THIRD_PARTY_NOTICES.md",
+    )
+    shutil.copytree(REPOSITORY / "licenses", root / "licenses")
+    legal_files = load_legal_corpus(root)
     payload = b"synthetic-native-api429"
 
     for npm_target in TARGETS:
@@ -45,9 +56,15 @@ def _write_fixture_set(root: Path) -> tuple[Path, Path, bytes]:
         executable = root / f"{npm_target.target}-{npm_target.executable}"
         executable.write_bytes(payload)
         archive = artifacts / names.archive
-        create_archive(executable, archive, target, epoch=0)
+        create_archive(
+            executable,
+            archive,
+            target,
+            epoch=0,
+            legal_files=legal_files,
+        )
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "package": "api429-cli",
             "version": "0.1.0",
             "target": npm_target.target,
@@ -78,6 +95,14 @@ def _write_fixture_set(root: Path) -> tuple[Path, Path, bytes]:
                 "idna",
             ],
             "frozen_native_files": ["libpython3.13.synthetic"],
+            "legal_files": [
+                {
+                    "path": item.archive_path,
+                    "sha256": item.sha256,
+                    "size": item.size,
+                }
+                for item in legal_files
+            ],
         }
         (artifacts / names.manifest).write_text(
             json.dumps(manifest) + "\n", encoding="utf-8"
@@ -97,6 +122,11 @@ def test_stage_all_verifies_then_writes_six_payloads(tmp_path: Path) -> None:
         )
         assert binary.read_bytes() == payload
         assert binary.stat().st_mode & 0o111
+        package = npm_root / "packages" / target.package_directory
+        for legal_file in load_legal_corpus(tmp_path):
+            staged = package.joinpath(*legal_file.archive_path.split("/"))
+            assert staged.read_bytes() == legal_file.source.read_bytes()
+            assert staged.stat().st_mode & 0o777 == 0o644
 
 
 def test_stage_all_does_not_write_partial_payloads_on_verification_error(
@@ -132,3 +162,17 @@ def test_stage_all_rejects_incomplete_dependency_manifest(tmp_path: Path) -> Non
 
     with pytest.raises(StagingError, match="incomplete bundled dependency"):
         stage_all(artifacts, npm_root, force=False)
+
+
+def test_stage_all_rejects_legal_corpus_mismatch_before_writing(tmp_path: Path) -> None:
+    artifacts, npm_root, _payload = _write_fixture_set(tmp_path)
+    manifest_path = next(artifacts.glob("*darwin-arm64.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["legal_files"][0]["sha256"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+
+    with pytest.raises(StagingError, match="legal corpus does not match"):
+        stage_all(artifacts, npm_root, force=False)
+
+    assert not list((npm_root / "packages").glob("*/bin/api429*"))
+    assert not list((npm_root / "packages").glob("*/LICENSE"))

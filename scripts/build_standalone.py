@@ -29,6 +29,11 @@ from importlib import metadata
 from pathlib import Path
 from typing import IO, Literal
 
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.legal_corpus import LegalCorpusError, LegalFile, load_legal_corpus
+
 PACKAGE_DISTRIBUTION = "api429-cli"
 EXECUTABLE_NAME = "api429"
 STANDALONE_PYTHON_VERSION = "3.13.13"
@@ -180,34 +185,30 @@ def create_archive(
     target: Target,
     *,
     epoch: int,
+    legal_files: Sequence[LegalFile] = (),
 ) -> None:
     """Create an archive with stable ordering, names, modes, and timestamps."""
     if target.platform == "win32":
         bounded_epoch = min(max(epoch, ZIP_MIN_EPOCH), ZIP_MAX_EPOCH)
-        zip_info = zipfile.ZipInfo(
-            target.executable,
-            date_time=time.gmtime(bounded_epoch)[:6],
-        )
-        zip_info.compress_type = zipfile.ZIP_DEFLATED
-        zip_info.create_system = 3
-        zip_info.external_attr = (stat.S_IFREG | 0o755) << 16
-        with (
-            zipfile.ZipFile(
-                archive, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
-            ) as zip_bundle,
-            zip_bundle.open(zip_info, mode="w") as destination,
-        ):
-            _copy_stream(executable, destination)
+        with zipfile.ZipFile(
+            archive, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+        ) as zip_bundle:
+            zip_entries = [
+                (target.executable, executable, 0o755),
+                *((item.archive_path, item.source, 0o644) for item in legal_files),
+            ]
+            for archive_path, source, mode in zip_entries:
+                zip_info = zipfile.ZipInfo(
+                    archive_path,
+                    date_time=time.gmtime(bounded_epoch)[:6],
+                )
+                zip_info.compress_type = zipfile.ZIP_DEFLATED
+                zip_info.create_system = 3
+                zip_info.external_attr = (stat.S_IFREG | mode) << 16
+                with zip_bundle.open(zip_info, mode="w") as destination:
+                    _copy_stream(source, destination)
         return
 
-    tar_info = tarfile.TarInfo(target.executable)
-    tar_info.size = executable.stat().st_size
-    tar_info.mode = 0o755
-    tar_info.mtime = epoch
-    tar_info.uid = 0
-    tar_info.gid = 0
-    tar_info.uname = ""
-    tar_info.gname = ""
     with (
         archive.open("wb") as archive_handle,
         gzip.GzipFile(
@@ -220,9 +221,22 @@ def create_archive(
         tarfile.open(
             mode="w", fileobj=compressed, format=tarfile.USTAR_FORMAT
         ) as tar_bundle,
-        executable.open("rb") as executable_handle,
     ):
-        tar_bundle.addfile(tar_info, executable_handle)
+        tar_entries = [
+            (target.executable, executable, 0o755),
+            *((item.archive_path, item.source, 0o644) for item in legal_files),
+        ]
+        for archive_path, source, mode in tar_entries:
+            tar_info = tarfile.TarInfo(archive_path)
+            tar_info.size = source.stat().st_size
+            tar_info.mode = mode
+            tar_info.mtime = epoch
+            tar_info.uid = 0
+            tar_info.gid = 0
+            tar_info.uname = ""
+            tar_info.gname = ""
+            with source.open("rb") as source_handle:
+                tar_bundle.addfile(tar_info, source_handle)
 
 
 def _mach_o_arches(header: bytes) -> set[str]:
@@ -440,6 +454,10 @@ def build_standalone(
     python: Path = Path(sys.executable),
 ) -> tuple[dict[str, object], Path]:
     repository = Path(__file__).resolve().parent.parent
+    try:
+        legal_files = load_legal_corpus(repository)
+    except LegalCorpusError as exc:
+        raise BuildError(f"invalid release legal corpus: {exc}") from exc
     version = _require_distribution(
         PACKAGE_DISTRIBUTION,
         "install the project first with `python -m pip install .`",
@@ -530,13 +548,19 @@ def build_standalone(
             )
 
         archive = build_root / names.archive
-        create_archive(executable, archive, target, epoch=epoch)
+        create_archive(
+            executable,
+            archive,
+            target,
+            epoch=epoch,
+            legal_files=legal_files,
+        )
         archive_digest = sha256_file(archive)
         executable_digest = sha256_file(executable)
         checksum = build_root / names.checksum
         checksum.write_bytes(f"{archive_digest}  {names.archive}\n".encode("ascii"))
         manifest: dict[str, object] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "package": PACKAGE_DISTRIBUTION,
             "version": version,
             "target": target.label,
@@ -558,6 +582,14 @@ def build_standalone(
             "bundled_dependencies": bundled_dependencies,
             "frozen_distributions": frozen_distributions,
             "frozen_native_files": frozen_native_files,
+            "legal_files": [
+                {
+                    "path": item.archive_path,
+                    "sha256": item.sha256,
+                    "size": item.size,
+                }
+                for item in legal_files
+            ],
         }
         manifest_path = build_root / names.manifest
         _write_json(manifest_path, manifest)

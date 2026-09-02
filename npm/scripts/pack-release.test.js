@@ -9,17 +9,31 @@ const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 
 const { expectedTarballFilename, isInside } = require("./pack-release.js");
-const { platforms, validatePayload } = require("./validate-packages.js");
+const {
+  loadLegalCorpus,
+  platforms,
+  validatePayload,
+} = require("./validate-packages.js");
 
 function writeMachO(file, arch) {
-  const value = Buffer.alloc(48);
+  const value = Buffer.alloc(128);
   value.set([0xcf, 0xfa, 0xed, 0xfe], 0);
   value.writeUInt32LE(arch === "x64" ? 0x01000007 : 0x0100000c, 4);
   value.writeUInt32LE(2, 12);
-  value.writeUInt32LE(1, 16);
-  value.writeUInt32LE(16, 20);
-  value.writeUInt32LE(0x24, 32);
-  value.writeUInt32LE(16, 36);
+  value.writeUInt32LE(2, 16);
+  value.writeUInt32LE(96, 20);
+  value.writeUInt32LE(0x19, 32);
+  value.writeUInt32LE(72, 36);
+  value.write("__TEXT", 40, "ascii");
+  value.writeBigUInt64LE(0x100000000n, 56);
+  value.writeBigUInt64LE(0x1000n, 64);
+  value.writeBigUInt64LE(0n, 72);
+  value.writeBigUInt64LE(BigInt(value.length), 80);
+  value.writeUInt32LE(5, 88);
+  value.writeUInt32LE(5, 92);
+  value.writeUInt32LE(0x80000028, 104);
+  value.writeUInt32LE(24, 108);
+  value.writeBigUInt64LE(120n, 112);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, value, { mode: 0o755 });
 }
@@ -45,6 +59,8 @@ function writeElf(file, arch) {
   value.writeBigUInt64LE(232n, 128);
   value.writeBigUInt64LE(BigInt(interpreter.length), 152);
   value.writeUInt32LE(1, 176);
+  value.writeUInt32LE(5, 180);
+  value.writeBigUInt64LE(0x1000n, 192);
   value.writeBigUInt64LE(BigInt(value.length), 208);
   value.writeBigUInt64LE(BigInt(value.length), 216);
   interpreter.copy(value, 232);
@@ -53,7 +69,7 @@ function writeElf(file, arch) {
 }
 
 function writePe(file, arch) {
-  const value = Buffer.alloc(240);
+  const value = Buffer.alloc(280);
   value.set([0x4d, 0x5a], 0);
   value.writeUInt32LE(64, 0x3c);
   value.set([0x50, 0x45, 0x00, 0x00], 64);
@@ -63,6 +79,12 @@ function writePe(file, arch) {
   value.writeUInt16LE(0x0002, 86);
   value.writeUInt16LE(0x020b, 88);
   value.writeUInt32LE(0x1000, 104);
+  value.write(".text", 200, "ascii");
+  value.writeUInt32LE(40, 208);
+  value.writeUInt32LE(0x1000, 212);
+  value.writeUInt32LE(40, 216);
+  value.writeUInt32LE(240, 220);
+  value.writeUInt32LE(0x60000020, 236);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, value);
 }
@@ -117,6 +139,43 @@ test("native validation rejects header-only Mach-O, ELF, and PE stubs", () => {
   }
 });
 
+test("native validation requires a file-backed executable entry point", () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "api429-invalid-entry-"));
+  try {
+    const machO = path.join(temporaryRoot, "api429-macho");
+    writeMachO(machO, "arm64");
+    const machPayload = fs.readFileSync(machO);
+    machPayload.writeUInt32LE(0x24, 104);
+    fs.writeFileSync(machO, machPayload, { mode: 0o755 });
+    assert.throws(
+      () => validatePayload(platforms.find(({ name }) => name === "@api429/cli-darwin-arm64"), machO),
+      /no LC_MAIN or LC_UNIXTHREAD/,
+    );
+
+    const elf = path.join(temporaryRoot, "api429-elf");
+    writeElf(elf, "x64");
+    const elfPayload = fs.readFileSync(elf);
+    elfPayload.writeUInt32LE(4, 180);
+    fs.writeFileSync(elf, elfPayload, { mode: 0o755 });
+    assert.throws(
+      () => validatePayload(platforms.find(({ name }) => name === "@api429/cli-linux-x64-gnu"), elf),
+      /entry point is not in a file-backed executable segment/,
+    );
+
+    const pe = path.join(temporaryRoot, "api429.exe");
+    writePe(pe, "x64");
+    const pePayload = fs.readFileSync(pe);
+    pePayload.writeUInt32LE(0x40000020, 236);
+    fs.writeFileSync(pe, pePayload);
+    assert.throws(
+      () => validatePayload(platforms.find(({ name }) => name === "@api429/cli-win32-x64"), pe),
+      /entry point is not in a file-backed executable section/,
+    );
+  } finally {
+    fs.rmSync(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
 test(
   "pack-release creates six platform tarballs before the meta tarball and emits checksums",
   { skip: process.platform === "win32", timeout: 30_000 },
@@ -133,8 +192,25 @@ test(
       });
       fs.writeFileSync(
         path.join(temporaryBase, "pyproject.toml"),
-        '[project]\nname = "api429-cli"\nversion = "0.1.0"\n',
+        '[project]\nname = "api429-cli"\nversion = "0.1.0"\nlicense = "MIT"\n',
       );
+
+      const legalCorpus = loadLegalCorpus();
+      for (const record of legalCorpus) {
+        const repositoryDestination = path.join(temporaryBase, ...record.path.split("/"));
+        fs.mkdirSync(path.dirname(repositoryDestination), { recursive: true });
+        fs.copyFileSync(record.source, repositoryDestination);
+        for (const platform of platforms) {
+          const packageDestination = path.join(
+            npmRoot,
+            "packages",
+            platform.name.slice("@api429/".length),
+            ...record.path.split("/"),
+          );
+          fs.mkdirSync(path.dirname(packageDestination), { recursive: true });
+          fs.copyFileSync(record.source, packageDestination);
+        }
+      }
 
       writeMachO(path.join(npmRoot, "packages/cli-darwin-arm64/bin/api429"), "arm64");
       writeMachO(path.join(npmRoot, "packages/cli-darwin-x64/bin/api429"), "x64");

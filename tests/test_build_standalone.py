@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import stat
 import sys
 import tarfile
 import zipfile
@@ -24,6 +25,8 @@ resolve_target = standalone.resolve_target
 source_date_epoch = standalone.source_date_epoch
 RUNTIME_DISTRIBUTIONS = standalone.RUNTIME_DISTRIBUTIONS
 STANDALONE_PYTHON_VERSION = standalone.STANDALONE_PYTHON_VERSION
+load_legal_corpus = importlib.import_module("scripts.legal_corpus").load_legal_corpus
+REPOSITORY = Path(__file__).resolve().parent.parent
 
 
 @pytest.mark.parametrize("platform", ["darwin", "linux", "win32"])
@@ -111,8 +114,9 @@ def test_tar_archive_is_stable_and_contains_executable(tmp_path: Path) -> None:
     second = tmp_path / "second.tar.gz"
     target = Target("linux", "arm64")
 
-    create_archive(executable, first, target, epoch=0)
-    create_archive(executable, second, target, epoch=0)
+    legal_files = load_legal_corpus(REPOSITORY)
+    create_archive(executable, first, target, epoch=0, legal_files=legal_files)
+    create_archive(executable, second, target, epoch=0, legal_files=legal_files)
 
     assert first.read_bytes() == second.read_bytes()
     with tarfile.open(first, mode="r:gz") as bundle:
@@ -122,6 +126,13 @@ def test_tar_archive_is_stable_and_contains_executable(tmp_path: Path) -> None:
         extracted = bundle.extractfile(member)
         assert extracted is not None
         assert extracted.read() == b"native-binary"
+        assert bundle.getnames() == [
+            "api429",
+            *(item.archive_path for item in legal_files),
+        ]
+        license_member = bundle.getmember("LICENSE")
+        assert license_member.mode == 0o644
+        assert license_member.mtime == 0
 
 
 def test_zip_archive_is_stable_and_contains_executable(tmp_path: Path) -> None:
@@ -131,18 +142,25 @@ def test_zip_archive_is_stable_and_contains_executable(tmp_path: Path) -> None:
     second = tmp_path / "second.zip"
     target = Target("win32", "x64")
 
-    create_archive(executable, first, target, epoch=0)
-    create_archive(executable, second, target, epoch=0)
+    legal_files = load_legal_corpus(REPOSITORY)
+    create_archive(executable, first, target, epoch=0, legal_files=legal_files)
+    create_archive(executable, second, target, epoch=0, legal_files=legal_files)
 
     assert (
         hashlib.sha256(first.read_bytes()).digest()
         == hashlib.sha256(second.read_bytes()).digest()
     )
     with zipfile.ZipFile(first) as bundle:
-        assert bundle.namelist() == ["api429.exe"]
+        assert bundle.namelist() == [
+            "api429.exe",
+            *(item.archive_path for item in legal_files),
+        ]
         info = bundle.getinfo("api429.exe")
         assert info.date_time == (1980, 1, 1, 0, 0, 0)
         assert bundle.read("api429.exe") == b"native-windows-binary"
+        license_info = bundle.getinfo("LICENSE")
+        assert stat.S_IMODE(license_info.external_attr >> 16) == 0o644
+        assert license_info.date_time == (1980, 1, 1, 0, 0, 0)
 
 
 @pytest.mark.parametrize(
@@ -188,7 +206,7 @@ def test_manifest_shape_is_json_serializable() -> None:
     # This protects the release contract from accidental Path or bytes values.
     names = artifact_names("0.1.0", Target("darwin", "arm64"))
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "archive": names.archive,
         "checksum": names.checksum,
         "executable": names.executable,

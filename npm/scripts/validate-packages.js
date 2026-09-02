@@ -1,12 +1,41 @@
 "use strict";
 
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const { PACKAGE_BY_TARGET, selectTarget } = require("../packages/cli/lib/launcher.js");
 
 const workspaceRoot = path.resolve(__dirname, "..");
+const repositoryRoot = path.resolve(workspaceRoot, "..");
 const version = "0.1.0";
+const platformLegalPatterns = ["LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/**"];
+const requiredLegalPaths = [
+  "LICENSE",
+  "THIRD_PARTY_NOTICES.md",
+  "licenses/BLAKE2-CC0-1.0.txt",
+  "licenses/CPython-3.13.13-Windows.txt",
+  "licenses/CPython-3.13.13.txt",
+  "licenses/HACL-MIT.txt",
+  "licenses/MPL-2.0.txt",
+  "licenses/OpenSSL-3.txt",
+  "licenses/PyInstaller-6.22.2.txt",
+  "licenses/PyInstaller-Hooks-Contrib-2026.7.txt",
+  "licenses/SQLite.txt",
+  "licenses/anyio-4.14.2.txt",
+  "licenses/bzip2.txt",
+  "licenses/certifi-2026.7.22.txt",
+  "licenses/expat.txt",
+  "licenses/h11-0.16.0.txt",
+  "licenses/httpcore-1.0.9.txt",
+  "licenses/httpx-0.28.1.txt",
+  "licenses/idna-3.19.txt",
+  "licenses/libffi.txt",
+  "licenses/liblzma.txt",
+  "licenses/libuuid.txt",
+  "licenses/mpdecimal.txt",
+  "licenses/zlib.txt",
+];
 const platforms = [
   { arch: "arm64", binary: "api429", libc: undefined, name: "@api429/cli-darwin-arm64", os: "darwin" },
   { arch: "x64", binary: "api429", libc: undefined, name: "@api429/cli-darwin-x64", os: "darwin" },
@@ -22,6 +51,121 @@ function packageDirectory(packageName) {
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function sha256(file) {
+  return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+
+function assertRegularFile(file, label = file) {
+  const metadata = fs.lstatSync(file);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error(`${label} must be a regular file, not a symlink or directory`);
+  }
+  return metadata;
+}
+
+function pathEntryExists(file) {
+  try {
+    fs.lstatSync(file);
+    return true;
+  } catch (error) {
+    if (error && error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function loadLegalCorpus() {
+  const manifestPath = path.join(repositoryRoot, "licenses", "manifest.json");
+  assertRegularFile(manifestPath, "legal manifest");
+  const manifest = readJson(manifestPath);
+  equal(Object.keys(manifest).sort(), ["files", "schema_version"], "legal manifest keys");
+  equal(manifest.schema_version, 1, "legal manifest schema");
+  if (!Array.isArray(manifest.files) || manifest.files.length < 3) {
+    throw new Error("legal manifest must contain project and third-party files");
+  }
+
+  const seen = new Set();
+  const records = manifest.files.map((record) => {
+    if (!record || typeof record !== "object" || Array.isArray(record)) {
+      throw new Error("legal manifest entries must be objects");
+    }
+    equal(Object.keys(record).sort(), ["path", "sha256"], "legal manifest entry keys");
+    const relative = record.path;
+    const isProjectFile = relative === "LICENSE" || relative === "THIRD_PARTY_NOTICES.md";
+    const isLicenseText =
+      typeof relative === "string" && /^licenses\/[A-Za-z0-9][A-Za-z0-9._+-]*\.txt$/.test(relative);
+    if (!isProjectFile && !isLicenseText) {
+      throw new Error(`unsafe or unsupported legal corpus path: ${JSON.stringify(relative)}`);
+    }
+    if (seen.has(relative)) throw new Error(`duplicate legal corpus path: ${relative}`);
+    seen.add(relative);
+    if (typeof record.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(record.sha256)) {
+      throw new Error(`invalid SHA-256 for ${relative}`);
+    }
+    const source = path.join(repositoryRoot, ...relative.split("/"));
+    const metadata = assertRegularFile(source, `legal corpus entry ${relative}`);
+    if (metadata.size < 1 || metadata.size > 2 * 1024 * 1024) {
+      throw new Error(`legal corpus entry ${relative} has an invalid size`);
+    }
+    if (sha256(source) !== record.sha256) {
+      throw new Error(`legal corpus SHA-256 mismatch for ${relative}`);
+    }
+    return { path: relative, sha256: record.sha256, size: metadata.size, source };
+  });
+  const listedPaths = records.map((record) => record.path);
+  const expectedOrder = [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    ...listedPaths.filter((value) => value.startsWith("licenses/")).sort(),
+  ];
+  equal(listedPaths, expectedOrder, "legal manifest file order");
+  const missingRequired = requiredLegalPaths.filter((value) => !seen.has(value));
+  if (missingRequired.length > 0) {
+    throw new Error(`legal manifest omits required runtime coverage: ${missingRequired.join(", ")}`);
+  }
+  const expectedDirectoryEntries = [
+    "manifest.json",
+    ...listedPaths
+      .filter((value) => value.startsWith("licenses/"))
+      .map((value) => path.basename(value)),
+  ].sort();
+  const actualDirectoryEntries = fs.readdirSync(path.dirname(manifestPath)).sort();
+  equal(actualDirectoryEntries, expectedDirectoryEntries, "legal corpus directory entries");
+
+  const manifestRecord = {
+    path: "licenses/manifest.json",
+    sha256: sha256(manifestPath),
+    size: fs.statSync(manifestPath).size,
+    source: manifestPath,
+  };
+  return [...records.slice(0, 2), manifestRecord, ...records.slice(2)];
+}
+
+function validateStagedLegalCorpus(directory, legalCorpus, required) {
+  const destinations = legalCorpus.map((record) =>
+    path.join(directory, ...record.path.split("/")),
+  );
+  const present = destinations.map(pathEntryExists);
+  const presentCount = present.filter(Boolean).length;
+  if (presentCount === 0 && !required) return;
+  if (presentCount !== destinations.length) {
+    throw new Error(`${directory} has an incomplete staged legal corpus`);
+  }
+  const expectedLicenseEntries = legalCorpus
+    .filter((record) => record.path.startsWith("licenses/"))
+    .map((record) => path.basename(record.path))
+    .sort();
+  const actualLicenseEntries = fs.readdirSync(path.join(directory, "licenses")).sort();
+  equal(actualLicenseEntries, expectedLicenseEntries, `${directory} staged license entries`);
+  for (let index = 0; index < destinations.length; index += 1) {
+    const destination = destinations[index];
+    const record = legalCorpus[index];
+    assertRegularFile(destination, `staged legal corpus entry ${record.path}`);
+    if (sha256(destination) !== record.sha256) {
+      throw new Error(`staged legal corpus SHA-256 mismatch for ${record.path}`);
+    }
+  }
 }
 
 function equal(actual, expected, message) {
@@ -81,8 +225,10 @@ function validatePayload(entry, payload) {
       ) {
         throw new Error(`${payload} has an invalid ELF program-header table`);
       }
+      const entryPoint = header.readBigUInt64LE(24);
       let interpreter;
       let hasLoadSegment = false;
+      let entryInExecutableSegment = false;
       for (let index = 0; index < programHeaderCount; index += 1) {
         const programHeader = Buffer.alloc(programHeaderSize);
         const offset = programHeaderOffset + index * programHeaderSize;
@@ -93,7 +239,29 @@ function validatePayload(entry, payload) {
           throw new Error(`${payload} has a truncated ELF program-header table`);
         }
         const programHeaderType = programHeader.readUInt32LE(0);
-        if (programHeaderType === 1) hasLoadSegment = true;
+        if (programHeaderType === 1) {
+          hasLoadSegment = true;
+          const flags = programHeader.readUInt32LE(4);
+          const fileOffset = programHeader.readBigUInt64LE(8);
+          const virtualAddress = programHeader.readBigUInt64LE(16);
+          const fileSize = programHeader.readBigUInt64LE(32);
+          const memorySize = programHeader.readBigUInt64LE(40);
+          if (
+            memorySize < fileSize ||
+            fileOffset > BigInt(metadata.size) ||
+            fileSize > BigInt(metadata.size) - fileOffset
+          ) {
+            throw new Error(`${payload} has an invalid ELF loadable segment`);
+          }
+          if (
+            (flags & 0x1) !== 0 &&
+            fileSize > 0n &&
+            entryPoint >= virtualAddress &&
+            entryPoint < virtualAddress + fileSize
+          ) {
+            entryInExecutableSegment = true;
+          }
+        }
         if (programHeaderType !== 3) continue;
         const interpreterOffset = Number(programHeader.readBigUInt64LE(8));
         const interpreterSize = Number(programHeader.readBigUInt64LE(32));
@@ -117,6 +285,9 @@ function validatePayload(entry, payload) {
       if (!hasLoadSegment) {
         throw new Error(`${payload} ELF executable has no loadable segment`);
       }
+      if (!entryInExecutableSegment) {
+        throw new Error(`${payload} ELF entry point is not in a file-backed executable segment`);
+      }
       if (!interpreter || !/(?:^|\/)ld-linux[^/]*\.so(?:\.|$)/.test(interpreter)) {
         throw new Error(`${payload} does not declare a glibc dynamic loader`);
       }
@@ -126,10 +297,13 @@ function validatePayload(entry, payload) {
     if (entry.os === "darwin") {
       const magic = header.subarray(0, 4).toString("hex");
       let readUInt32;
+      let readBigUInt64;
       if (magic === "cffaedfe") {
         readUInt32 = (buffer, offset) => buffer.readUInt32LE(offset);
+        readBigUInt64 = (buffer, offset) => buffer.readBigUInt64LE(offset);
       } else if (magic === "feedfacf") {
         readUInt32 = (buffer, offset) => buffer.readUInt32BE(offset);
+        readBigUInt64 = (buffer, offset) => buffer.readBigUInt64BE(offset);
       } else {
         throw new Error(`${payload} is not a thin 64-bit Mach-O executable`);
       }
@@ -152,19 +326,68 @@ function validatePayload(entry, payload) {
         throw new Error(`${payload} has an invalid Mach-O load-command table`);
       }
       let commandOffset = 32;
+      let mainEntryOffset;
+      let hasUnixThread = false;
+      const executableFileRanges = [];
       for (let index = 0; index < commandCount; index += 1) {
         const loadCommand = Buffer.alloc(8);
         if (fs.readSync(descriptor, loadCommand, 0, 8, commandOffset) !== 8) {
           throw new Error(`${payload} has a truncated Mach-O load command`);
         }
+        const command = readUInt32(loadCommand, 0);
         const size = readUInt32(loadCommand, 4);
         if (size < 8 || size % 8 !== 0 || commandOffset + size > 32 + commandBytes) {
           throw new Error(`${payload} has an invalid Mach-O load command`);
+        }
+        const commandBody = Buffer.alloc(size);
+        if (fs.readSync(descriptor, commandBody, 0, size, commandOffset) !== size) {
+          throw new Error(`${payload} has a truncated Mach-O load command`);
+        }
+        if (command === 0x19) {
+          if (size < 72) {
+            throw new Error(`${payload} has a truncated Mach-O LC_SEGMENT_64 command`);
+          }
+          const fileOffset = readBigUInt64(commandBody, 40);
+          const fileSize = readBigUInt64(commandBody, 48);
+          const initialProtection = readUInt32(commandBody, 60);
+          if (
+            fileOffset > BigInt(metadata.size) ||
+            fileSize > BigInt(metadata.size) - fileOffset
+          ) {
+            throw new Error(`${payload} has an invalid Mach-O segment file range`);
+          }
+          if ((initialProtection & 0x4) !== 0 && fileSize > 0n) {
+            executableFileRanges.push([fileOffset, fileOffset + fileSize]);
+          }
+        } else if (command === 0x80000028) {
+          if (size < 24) {
+            throw new Error(`${payload} has a truncated Mach-O LC_MAIN command`);
+          }
+          mainEntryOffset = readBigUInt64(commandBody, 8);
+        } else if (command === 0x5) {
+          if (size < 16) {
+            throw new Error(`${payload} has a truncated Mach-O LC_UNIXTHREAD command`);
+          }
+          hasUnixThread = true;
         }
         commandOffset += size;
       }
       if (commandOffset !== 32 + commandBytes) {
         throw new Error(`${payload} Mach-O load-command sizes are inconsistent`);
+      }
+      if (executableFileRanges.length === 0) {
+        throw new Error(`${payload} Mach-O executable has no file-backed executable segment`);
+      }
+      if (mainEntryOffset === undefined && !hasUnixThread) {
+        throw new Error(`${payload} Mach-O executable has no LC_MAIN or LC_UNIXTHREAD entry point`);
+      }
+      if (
+        mainEntryOffset !== undefined &&
+        !executableFileRanges.some(
+          ([start, end]) => mainEntryOffset >= start && mainEntryOffset < end,
+        )
+      ) {
+        throw new Error(`${payload} Mach-O LC_MAIN entry point is not in an executable segment`);
       }
       return;
     }
@@ -203,7 +426,8 @@ function validatePayload(entry, payload) {
     ) {
       throw new Error(`${payload} has a truncated PE optional header`);
     }
-    if (optionalHeader.readUInt16LE(0) !== 0x020b || optionalHeader.readUInt32LE(16) === 0) {
+    const entryRva = optionalHeader.readUInt32LE(16);
+    if (optionalHeader.readUInt16LE(0) !== 0x020b || entryRva === 0) {
       throw new Error(`${payload} must be a PE32+ executable with an entry point`);
     }
     const sectionTableSize = sectionCount * 40;
@@ -219,6 +443,34 @@ function validatePayload(entry, payload) {
     ) {
       throw new Error(`${payload} has a truncated PE section table`);
     }
+    let entryInExecutableSection = false;
+    for (let index = 0; index < sectionCount; index += 1) {
+      const offset = index * 40;
+      const virtualSize = sectionTable.readUInt32LE(offset + 8);
+      const virtualAddress = sectionTable.readUInt32LE(offset + 12);
+      const rawSize = sectionTable.readUInt32LE(offset + 16);
+      const rawOffset = sectionTable.readUInt32LE(offset + 20);
+      const sectionCharacteristics = sectionTable.readUInt32LE(offset + 36);
+      if ((sectionCharacteristics & 0x20000000) === 0) continue;
+      if (
+        rawSize === 0 ||
+        rawOffset > metadata.size ||
+        rawSize > metadata.size - rawOffset
+      ) {
+        throw new Error(`${payload} has an invalid PE executable section`);
+      }
+      const virtualSpan = Math.max(virtualSize, rawSize);
+      if (
+        entryRva >= virtualAddress &&
+        entryRva - virtualAddress < virtualSpan &&
+        entryRva - virtualAddress < rawSize
+      ) {
+        entryInExecutableSection = true;
+      }
+    }
+    if (!entryInExecutableSection) {
+      throw new Error(`${payload} PE entry point is not in a file-backed executable section`);
+    }
   } finally {
     fs.closeSync(descriptor);
   }
@@ -226,11 +478,27 @@ function validatePayload(entry, payload) {
 
 function validate({ quiet = false, requirePayload = false } = {}) {
   const log = quiet ? () => {} : console.log;
+  const legalCorpus = loadLegalCorpus();
   const rootManifest = readJson(path.join(workspaceRoot, "package.json"));
   if (!rootManifest.private) throw new Error("npm workspace root must remain private");
   equal(rootManifest.workspaces, ["packages/cli"], "root workspaces");
-  if (Object.hasOwn(rootManifest, "license")) {
-    throw new Error("license must not be guessed in the private workspace manifest");
+  equal(rootManifest.license, "MIT", "private workspace license");
+
+  const lockfile = readJson(path.join(workspaceRoot, "package-lock.json"));
+  equal(lockfile.lockfileVersion, 3, "npm lockfile version");
+  equal(lockfile.packages?.[""]?.license, "MIT", "npm lockfile root license");
+  equal(
+    lockfile.packages?.["packages/cli"]?.license,
+    "MIT",
+    "npm lockfile @api429/cli license",
+  );
+  for (const { name } of platforms) {
+    const packagePath = `packages/${name.slice("@api429/".length)}`;
+    equal(
+      lockfile.packages?.[packagePath]?.license,
+      "MIT",
+      `npm lockfile ${name} license`,
+    );
   }
 
   const pyproject = fs.readFileSync(path.resolve(workspaceRoot, "..", "pyproject.toml"), "utf8");
@@ -241,10 +509,17 @@ function validate({ quiet = false, requirePayload = false } = {}) {
   const cliDirectory = packageDirectory("@api429/cli");
   const cliManifest = readJson(path.join(cliDirectory, "package.json"));
   equal(cliManifest.version, version, "@api429/cli version");
+  equal(cliManifest.license, "MIT", "@api429/cli license");
   equal(cliManifest.bin, { api429: "bin/api429.js" }, "@api429/cli bin mapping");
   equal(
     cliManifest.files,
-    ["bin/api429.js", "lib/launcher.js", "README.md"],
+    [
+      "bin/api429.js",
+      "lib/launcher.js",
+      "README.md",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md",
+    ],
     "@api429/cli files",
   );
   equal(
@@ -252,8 +527,16 @@ function validate({ quiet = false, requirePayload = false } = {}) {
     { access: "public", registry: "https://registry.npmjs.org/" },
     "@api429/cli publishConfig",
   );
-  if (Object.hasOwn(cliManifest, "license")) {
-    throw new Error("license must not be guessed in @api429/cli");
+  const cliLicense = path.join(cliDirectory, "LICENSE");
+  const cliNotice = path.join(cliDirectory, "THIRD_PARTY_NOTICES.md");
+  assertRegularFile(cliLicense, "@api429/cli LICENSE");
+  assertRegularFile(cliNotice, "@api429/cli THIRD_PARTY_NOTICES.md");
+  if (sha256(cliLicense) !== sha256(path.join(repositoryRoot, "LICENSE"))) {
+    throw new Error("@api429/cli LICENSE must match the project LICENSE exactly");
+  }
+  const cliNoticeText = fs.readFileSync(cliNotice, "utf8");
+  if (!cliNoticeText.includes("@api429/cli-*") || !cliNoticeText.includes("licenses/")) {
+    throw new Error("@api429/cli notice must point to platform-package legal files");
   }
   if (cliManifest.scripts?.postinstall) {
     throw new Error("@api429/cli must not download a binary from postinstall");
@@ -290,6 +573,7 @@ function validate({ quiet = false, requirePayload = false } = {}) {
     const manifest = readJson(path.join(directory, "package.json"));
     equal(manifest.name, entry.name, `${entry.name} name`);
     equal(manifest.version, version, `${entry.name} version`);
+    equal(manifest.license, "MIT", `${entry.name} license`);
     equal(manifest.os, [entry.os], `${entry.name} os`);
     equal(manifest.cpu, [entry.arch], `${entry.name} cpu`);
     equal(
@@ -297,15 +581,16 @@ function validate({ quiet = false, requirePayload = false } = {}) {
       { access: "public", registry: "https://registry.npmjs.org/" },
       `${entry.name} publishConfig`,
     );
-    equal(manifest.files, [`bin/${entry.binary}`], `${entry.name} payload allowlist`);
+    equal(
+      manifest.files,
+      [`bin/${entry.binary}`, ...platformLegalPatterns],
+      `${entry.name} payload and legal allowlist`,
+    );
     equal(manifest.preferUnplugged, true, `${entry.name} preferUnplugged`);
     if (entry.libc) {
       equal(manifest.libc, [entry.libc], `${entry.name} libc`);
     } else if (Object.hasOwn(manifest, "libc")) {
       throw new Error(`${entry.name} must not declare libc`);
-    }
-    if (Object.hasOwn(manifest, "license")) {
-      throw new Error(`license must not be guessed in ${entry.name}`);
     }
     if (manifest.scripts?.postinstall) {
       throw new Error(`${entry.name} must not have a postinstall download`);
@@ -320,12 +605,14 @@ function validate({ quiet = false, requirePayload = false } = {}) {
     equal(PACKAGE_BY_TARGET[selected.target], entry.name, `${entry.name} target mapping`);
 
     const payload = path.join(directory, "bin", entry.binary);
-    if (fs.existsSync(payload)) {
+    if (pathEntryExists(payload)) {
       validatePayload(entry, payload);
+      validateStagedLegalCorpus(directory, legalCorpus, true);
       log(`validated payload: ${path.relative(workspaceRoot, payload)}`);
     } else if (requirePayload) {
       throw new Error(`required release payload is missing: ${payload}`);
     } else {
+      validateStagedLegalCorpus(directory, legalCorpus, false);
       log(`payload pending release staging: ${path.relative(workspaceRoot, payload)}`);
     }
   }
@@ -343,7 +630,9 @@ if (require.main === module) {
 }
 
 module.exports = {
+  loadLegalCorpus,
   packageDirectory,
+  platformLegalPatterns,
   platforms,
   validate,
   validatePayload,

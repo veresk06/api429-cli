@@ -1,0 +1,101 @@
+{
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "fa0312ee6e1eb0b773ad06c904e59cf52a6d47892aaad204467d6ef8ca71ce7f"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "sha256": "06a2ce83724336c030f30c582e617c14d059262bdd3916a7a1666a30ca0090e7"
+    },
+    {
+      "path": "licenses/BLAKE2-CC0-1.0.txt",
+      "sha256": "d7e525fdc2fa3ca5adc4c5c3574d800e2e574032698502381a8c655523c6fc76"
+    },
+    {
+      "path": "licenses/CPython-3.13.13-Windows.txt",
+      "sha256": "59688d8633ce27b1d8220f223b9520c4e039e4ba6ccceb345793a74fd5c155b9"
+    },
+    {
+      "path": "licenses/CPython-3.13.13.txt",
+      "sha256": "62f2c9c2c75d511170eb464ad5f83b78cc1f37eb2eb49c2846c9aa6c4557ee99"
+    },
+    {
+      "path": "licenses/HACL-MIT.txt",
+      "sha256": "998ce04fb8ad9dedb0bc1b44938f8c3dcf1089780fa105ce1c8c30fb5554d78c"
+    },
+    {
+      "path": "licenses/MPL-2.0.txt",
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+    },
+    {
+      "path": "licenses/OpenSSL-3.txt",
+      "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+    },
+    {
+      "path": "licenses/PyInstaller-6.22.2.txt",
+      "sha256": "dcf75fdb959db1e3b41c0f8505069d2ece781b5ec6b3d0a4d30975cfc6580245"
+    },
+    {
+      "path": "licenses/PyInstaller-Hooks-Contrib-2026.7.txt",
+      "sha256": "91d0baaff00773038e72c0a1fc9d5d2d38706b7a2b9c04f34296608f931b9cd0"
+    },
+    {
+      "path": "licenses/SQLite.txt",
+      "sha256": "38bef3d28b24f145ea293bd3b6eb4b20396982abc8303128fb493986ea5bc719"
+    },
+    {
+      "path": "licenses/anyio-4.14.2.txt",
+      "sha256": "5361ac9dc58f2ef5fd2e9b09c68297c17f04950909bbc8023bdb82eacf22c2b0"
+    },
+    {
+      "path": "licenses/bzip2.txt",
+      "sha256": "1f38bbc7caacafd65169276d759c0d88c991b753b643ce35d0e45ea1971dd441"
+    },
+    {
+      "path": "licenses/certifi-2026.7.22.txt",
+      "sha256": "e93716da6b9c0d5a4a1df60fe695b370f0695603d21f6f83f053e42cfc10caf7"
+    },
+    {
+      "path": "licenses/expat.txt",
+      "sha256": "122f2c27000472a201d337b9b31f7eb2b52d091b02857061a8880371612d9534"
+    },
+    {
+      "path": "licenses/h11-0.16.0.txt",
+      "sha256": "37db5bb85926db28a427a25867f10b1232003aea1be69ccb851138adb8e6f361"
+    },
+    {
+      "path": "licenses/httpcore-1.0.9.txt",
+      "sha256": "fdcb59154c74cbaba16a11242f7740bea9f23d6feb5547917d8c5f94a80392a5"
+    },
+    {
+      "path": "licenses/httpx-0.28.1.txt",
+      "sha256": "4ec59d544f12b5f539a3a716fd321ac58ccd8030b465221f2c880200cdf28d8d"
+    },
+    {
+      "path": "licenses/idna-3.19.txt",
+      "sha256": "1a9a4f0e3d479a27240ddd59a9137a66ab4a0f9dfdc8ca6188cc0bfd85187f04"
+    },
+    {
+      "path": "licenses/libffi.txt",
+      "sha256": "deaf3a42effb551a5b140fa9afefed183a27f1341c6d1bf430d106a5e6931fc0"
+    },
+    {
+      "path": "licenses/liblzma.txt",
+      "sha256": "9a4062de0a2c388a98cf35a35d348b62fa97c838a71c3c28ee1a2d7d0a565b02"
+    },
+    {
+      "path": "licenses/libuuid.txt",
+      "sha256": "122ee1f7e258f2c3c0e538a75c037684f420454bf3850ddc74ce750bbf5fe86b"
+    },
+    {
+      "path": "licenses/mpdecimal.txt",
+      "sha256": "669512af7219f58be03a398766d7c9da11a3b3df9d3f05cb74c5ceca25c8da3b"
+    },
+    {
+      "path": "licenses/zlib.txt",
+      "sha256": "818922b2620f12801a12bf78e399644a30990e66824abd8ca8ec24d451d6f92c"
+    }
+  ],
+  "schema_version": 1
+}

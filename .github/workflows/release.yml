@@ -85,6 +85,9 @@ jobs:
           legal_files = {
               "LICENSE": repository / "LICENSE",
               "THIRD_PARTY_NOTICES.md": repository / "THIRD_PARTY_NOTICES.md",
+              "licenses/CPython-3.13.13-Windows.txt": (
+                  repository / "licenses" / "CPython-3.13.13-Windows.txt"
+              ),
           }
           for name, path in legal_files.items():
               if not path.is_file() or path.stat().st_size < 100:
@@ -102,6 +105,9 @@ jobs:
               "HTTPCORE",
               "HTTPX",
               "IDNA",
+              "MICROSOFT",
+              "UCRT",
+              "VCRUNTIME",
           )
           notices = legal_files["THIRD_PARTY_NOTICES.md"].read_text(
               encoding="utf-8"
@@ -112,6 +118,19 @@ jobs:
                   "THIRD_PARTY_NOTICES.md must cover bundled components: "
                   + ", ".join(missing_notices)
               )
+
+          windows_terms = legal_files[
+              "licenses/CPython-3.13.13-Windows.txt"
+          ].read_text(encoding="utf-8").upper()
+          for required in (
+              "ADDITIONAL CONDITIONS FOR THIS WINDOWS BINARY BUILD",
+              "MICROSOFT DISTRIBUTABLE CODE",
+              "FURTHER DISTRIBUTE",
+          ):
+              if required not in windows_terms:
+                  raise SystemExit(
+                      "CPython Windows license is missing Microsoft runtime terms"
+                  )
 
           package_files = sorted((repository / "npm" / "packages").glob("*/package.json"))
           if len(package_files) != 7:

@@ -1,4 +1,7 @@
 include CHANGELOG.md
 include CONTRIBUTING.md
+include LICENSE
 include SECURITY.md
+include THIRD_PARTY_NOTICES.md
+recursive-include licenses *.json *.txt
 recursive-include tests *.py

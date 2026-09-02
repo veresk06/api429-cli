@@ -2,6 +2,7 @@
   "name": "@api429/cli",
   "version": "0.1.0",
   "description": "Official command-line client for the API429 gateway",
+  "license": "MIT",
   "type": "commonjs",
   "bin": {
     "api429": "bin/api429.js"
@@ -9,7 +10,9 @@
   "files": [
     "bin/api429.js",
     "lib/launcher.js",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "engines": {
     "node": ">=18"

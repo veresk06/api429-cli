@@ -6,6 +6,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const {
+  loadLegalCorpus,
   packageDirectory,
   platforms,
   validate,
@@ -66,8 +67,20 @@ function packPackage(packageName, outputDirectory, spawnSyncImpl = spawnSync) {
   const packedFiles = new Set(packed.files.map(({ path: file }) => file));
   const platform = platforms.find(({ name }) => name === packageName);
   const requiredFiles = platform
-    ? ["README.md", "package.json", `bin/${platform.binary}`]
-    : ["README.md", "package.json", "bin/api429.js", "lib/launcher.js"];
+    ? [
+        "README.md",
+        "package.json",
+        `bin/${platform.binary}`,
+        ...loadLegalCorpus().map((record) => record.path),
+      ]
+    : [
+        "README.md",
+        "package.json",
+        "bin/api429.js",
+        "lib/launcher.js",
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+      ];
   for (const required of requiredFiles) {
     if (!packedFiles.has(required)) {
       throw new Error(`${packageName} tarball would omit required file: ${required}`);

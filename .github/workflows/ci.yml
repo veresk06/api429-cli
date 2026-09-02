@@ -60,6 +60,130 @@ jobs:
       - name: Run CLI smoke test
         run: api429 --version
 
+  npm:
+    name: npm package tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: npm/package-lock.json
+          package-manager-cache: false
+      - name: Install npm workspace
+        working-directory: npm
+        run: npm ci --ignore-scripts
+      - name: Validate npm packages
+        working-directory: npm
+        run: npm run check
+
+  standalone:
+    name: Standalone ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-22.04
+            architecture: x64
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+            architecture: arm64
+          - target: darwin-x64
+            runner: macos-15-intel
+            architecture: x64
+          - target: darwin-arm64
+            runner: macos-15
+            architecture: arm64
+          - target: win32-x64
+            runner: windows-2025
+            architecture: x64
+          - target: win32-arm64
+            runner: windows-11-vs2026-arm
+            architecture: arm64
+    env:
+      PYTHONHASHSEED: "0"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13.13"
+          architecture: ${{ matrix.architecture }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            scripts/requirements-standalone.txt
+      - name: Install standalone build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+          python -m pip install -r scripts/requirements-standalone.txt
+      - name: Build and verify native executable
+        run: python scripts/build_standalone.py --output-dir dist/standalone
+      - name: Upload native artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: standalone-${{ matrix.target }}
+          path: dist/standalone/*
+          if-no-files-found: error
+          retention-days: 14
+
+  npm-distributions:
+    name: Build npm distributions
+    needs: [npm, standalone]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: npm/package-lock.json
+          package-manager-cache: false
+      - name: Download native artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: standalone-*
+          path: dist/standalone
+          merge-multiple: true
+      - name: Verify and stage native payloads
+        run: python scripts/stage_npm_binaries.py --artifacts-dir dist/standalone
+      - name: Install npm workspace
+        working-directory: npm
+        run: npm ci --ignore-scripts
+      - name: Build npm tarballs
+        working-directory: npm
+        run: |
+          npm run check
+          npm run --silent pack:release -- ../dist/npm > ../dist/npm-manifest.json
+      - name: Smoke-install npm tarballs
+        run: |
+          npm install --ignore-scripts --no-save --prefix dist/npm-smoke \
+            "$(pwd)/dist/npm/api429-cli-0.1.0.tgz" \
+            "$(pwd)/dist/npm/api429-cli-linux-x64-gnu-0.1.0.tgz"
+          dist/npm-smoke/node_modules/.bin/api429 --version
+      - name: Upload npm distributions
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: npm-distributions
+          path: |
+            dist/npm/*.tgz
+            dist/npm-manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
   build:
     name: Build distributions
     needs: [test, platform-smoke]

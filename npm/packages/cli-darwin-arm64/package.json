@@ -1,0 +1,16 @@
+{
+  "name": "@api429/cli-darwin-arm64",
+  "version": "0.1.0",
+  "description": "API429 CLI native binary for macOS arm64",
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "preferUnplugged": true,
+  "files": ["bin/api429", "LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/**"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/veresk06/api429-cli.git",
+    "directory": "npm/packages/cli-darwin-arm64"
+  },
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" }
+}

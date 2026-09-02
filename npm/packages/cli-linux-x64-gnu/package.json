@@ -1,0 +1,17 @@
+{
+  "name": "@api429/cli-linux-x64-gnu",
+  "version": "0.1.0",
+  "description": "API429 CLI native binary for Linux x64 (glibc)",
+  "license": "MIT",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "libc": ["glibc"],
+  "preferUnplugged": true,
+  "files": ["bin/api429", "LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/**"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/veresk06/api429-cli.git",
+    "directory": "npm/packages/cli-linux-x64-gnu"
+  },
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" }
+}

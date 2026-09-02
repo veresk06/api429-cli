@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,13 @@ name = "api429-cli"
 version = "0.1.0"
 description = "Official command-line client for the API429 gateway"
 readme = "README.md"
+license = "MIT"
+license-files = [
+  "LICENSE",
+  "THIRD_PARTY_NOTICES.md",
+  "licenses/*.txt",
+  "licenses/manifest.json",
+]
 requires-python = ">=3.10"
 authors = [
   { name = "API429" },

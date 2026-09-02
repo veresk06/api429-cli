@@ -1,0 +1,27 @@
+{
+  "name": "api429-npm-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "workspaces": [
+    "packages/cli"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@api429/cli-darwin-arm64": "file:packages/cli-darwin-arm64",
+    "@api429/cli-darwin-x64": "file:packages/cli-darwin-x64",
+    "@api429/cli-linux-arm64-gnu": "file:packages/cli-linux-arm64-gnu",
+    "@api429/cli-linux-x64-gnu": "file:packages/cli-linux-x64-gnu",
+    "@api429/cli-win32-arm64": "file:packages/cli-win32-arm64",
+    "@api429/cli-win32-x64": "file:packages/cli-win32-x64"
+  },
+  "scripts": {
+    "test": "node --test packages/cli/test/*.test.js scripts/*.test.js",
+    "validate": "node scripts/validate-packages.js",
+    "pack:dry-run": "node scripts/pack-dry-run.js",
+    "pack:release": "node scripts/pack-release.js",
+    "check": "npm run validate && npm test && npm run pack:dry-run"
+  }
+}

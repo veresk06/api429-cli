@@ -1,0 +1,16 @@
+{
+  "name": "@api429/cli-win32-x64",
+  "version": "0.1.0",
+  "description": "API429 CLI native binary for Windows x64",
+  "license": "MIT",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "preferUnplugged": true,
+  "files": ["bin/api429.exe", "LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/**"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/veresk06/api429-cli.git",
+    "directory": "npm/packages/cli-win32-x64"
+  },
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" }
+}

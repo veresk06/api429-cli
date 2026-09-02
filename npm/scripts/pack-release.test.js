@@ -30,7 +30,7 @@ function writeElf(file, arch) {
       ? "/lib64/ld-linux-x86-64.so.2\0"
       : "/lib/ld-linux-aarch64.so.1\0",
   );
-  const value = Buffer.alloc(176 + interpreter.length);
+  const value = Buffer.alloc(232 + interpreter.length);
   value.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1], 0);
   value.writeUInt16LE(3, 16);
   value.writeUInt16LE(arch === "x64" ? 0x3e : 0xb7, 18);
@@ -39,14 +39,15 @@ function writeElf(file, arch) {
   value.writeBigUInt64LE(64n, 32);
   value.writeUInt16LE(64, 52);
   value.writeUInt16LE(56, 54);
-  value.writeUInt16LE(2, 56);
-  value.writeUInt32LE(1, 64);
-  value.writeBigUInt64LE(BigInt(value.length), 96);
-  value.writeBigUInt64LE(BigInt(value.length), 104);
+  value.writeUInt16LE(3, 56);
+  value.writeUInt32LE(6, 64);
   value.writeUInt32LE(3, 120);
-  value.writeBigUInt64LE(176n, 128);
+  value.writeBigUInt64LE(232n, 128);
   value.writeBigUInt64LE(BigInt(interpreter.length), 152);
-  interpreter.copy(value, 176);
+  value.writeUInt32LE(1, 176);
+  value.writeBigUInt64LE(BigInt(value.length), 208);
+  value.writeBigUInt64LE(BigInt(value.length), 216);
+  interpreter.copy(value, 232);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, value, { mode: 0o755 });
 }

@@ -113,7 +113,6 @@ function validatePayload(entry, payload) {
           throw new Error(`${payload} has a truncated ELF interpreter record`);
         }
         interpreter = value.toString("utf8").replace(/\0.*$/s, "");
-        break;
       }
       if (!hasLoadSegment) {
         throw new Error(`${payload} ELF executable has no loadable segment`);

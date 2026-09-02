@@ -127,7 +127,7 @@ function main(argv = process.argv.slice(2), environment = process.env) {
       }
       fs.renameSync(entry.tarball, tarball);
       movedTarballs.push(tarball);
-      return { ...entry, tarball };
+      return { ...entry, tarball: path.basename(tarball) };
     });
   } catch (error) {
     for (const tarball of movedTarballs) {

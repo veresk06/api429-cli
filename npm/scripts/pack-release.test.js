@@ -159,11 +159,12 @@ test(
       assert.equal(manifest.packages.slice(0, -1).every(({ name }) => name !== "@api429/cli"), true);
 
       for (const entry of manifest.packages) {
-        assert.equal(path.dirname(entry.tarball), outputDirectory);
-        assert.equal(fs.existsSync(entry.tarball), true);
+        assert.equal(path.dirname(entry.tarball), ".");
+        const tarball = path.join(outputDirectory, entry.tarball);
+        assert.equal(fs.existsSync(tarball), true);
         const digest = crypto
           .createHash("sha512")
-          .update(fs.readFileSync(entry.tarball))
+          .update(fs.readFileSync(tarball))
           .digest("hex");
         assert.equal(entry.sha512, digest);
       }
